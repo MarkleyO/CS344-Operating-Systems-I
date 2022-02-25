@@ -1,0 +1,185 @@
+#!/bin/bash
+
+#gathers how many arguments were passed in by the user and saves to variable
+numArgs=$#
+
+#creates a temporary file first, if there is no second argument, then the arg for cat is stored in temporary
+#otherwise, the second argument is placed into the variable temporary
+temporary="temp$$"
+if [ -z $2 ]
+then
+	cat > $temporary
+else
+	temporary=$2
+fi
+
+#calculates the dimensions of the matrix in the format of rows and columns separated by a tab
+dims(){
+	#checks to see how many arguments have been passed in, if it's greater than 2 a message and value
+	# is output to standard error
+	if [ $numArgs -gt 2 ]
+	then
+		echo "ERROR: TOO MANY ARGS" >&2
+		exit 2
+	fi
+	#wc gathers the amount of words first, the -l modifier is then used to get how many lines, or rows there are
+	# since all matrices are a rectangle the area(or words) divided by height(or rows) will be the cols
+	# the solution is then output through echo
+	numWords=$(wc -w < $temporary)
+	numRows=$(wc -l < $temporary)
+	numCols=$((numWords / numRows))
+	echo "$numRows $numCols"
+	return 0
+}
+
+#takes a matrix and turns columns into rows
+transpose(){
+	# the -r command will check to see if a file can be read, if it cannot, then an error is output through stderr
+	if [ ! -r $temporary ]
+	then
+		echo "ERROR: UNREADBLE FILE" >&2
+		exit 2
+	fi
+	#head grabs the first line, and piping this into the number of words will give you the amount of cols
+	# the same method as in dims is used to get how many rows there are
+	cols=$(head -n 1 $temporary | wc -w)
+	rows=$(wc -l < $temporary)
+	#this for loop uses the seq command to have i iterate through the series of numbers 1 through how many cols there are
+	# a variable is used to track what row the algorithm is on. A second for loop then iterates through the lines in a column that has been cut
+	# the field that is being cut will vary with the variable i. Each iteration through thi sinner loop increments the current row. The number at
+	# this location is then output and if the current row isn't the last row, then a tab is output. An echo is placed after each run of this inner loop to
+	# break between rows
+	for i in $(seq 1 $cols)
+	do
+		currRow=0
+		for line in $(cut -f $i $temporary)
+		do
+			currRow=$((currRow+1))
+			printf "%d" $line
+			if [ $currRow -lt $rows ]
+			then
+				printf "\t"
+			fi
+		done
+		echo
+	done < $temporary
+	return 0	
+}
+
+#takes the mean value of each column and outputs them as a single vector
+mean(){
+	#Same methods to get dimensions as above are used here
+	cols=$(head -n 1 $temporary | wc -w)
+	rows=$(wc -l < $temporary)
+	#the variable i sequences through for each column in the matrix. A variable is declared as zero for the sum and is reset upon each new column. In the next
+	# loop, a cut column is iterated through the same as in the above function. Each word is then added to this temporary sum. After each column is sum'd up 
+	# it is divided by the number of rows and output. If it's not the end of the row, there will be a tab output as well
+	for i in $(seq 1 $cols)
+	do
+		sum=0
+		for line in $(cut -f $i $temporary)
+		do
+			sum=$((sum+line))
+		done
+		dimension=$(( (sum + (rows/2)*( (sum>0)*2-1 )) / rows ))
+		printf "%d" $dimension
+		if [ $i -lt $cols ]
+		then
+			printf "\t"
+		fi
+	done < $temporary
+	echo
+	return 0
+}
+
+#two matrices of the same size are added together and output
+add(){
+	#takes the number of arguments from above, and if there aren't exactly three, an error is output to stderr
+	if [ $numArgs -ne 3 ]
+	then
+		echo "ERROR: IMPROPER ARGS" >&2
+		exit 2
+	fi
+	#dimensions of the two matrices are calculated using the same methods as the above functions
+	cols=$(head -n 1 $temporary | wc -w)
+	rows=$(wc -l < $temporary)
+	colsB=$(head -n 1 $2 | wc -w)
+	rowsB=$(wc -l < $2)
+	#if either the number of columns or number of rows between the two matrices don't match, an error is output
+	# to stderr
+	if [ $cols -ne $colsB ]
+	then
+		echo "ERROR: COLUMN SIZES DO NOT MATCH" >&2
+		exit 2
+	fi
+	if [ $rows -ne $rowsB ]
+	then
+		echo "ERROR: ROW SIZES DO NOT MATCH" >&2
+		exit 2
+	fi
+	#the number i iterates through for each row there is in the matrices, a second inner for loop then increments j for each column in the matrices
+	# The number from each matrix at location i, j is then grabbed using a combination of head, tail, and cut. Head grabs increasingly larger 
+	# chunks of lines as it increments. tail will then always grab the bottom line from this chunk. Since there is one single line grabbed
+	# iterating through with cut will grab single characters on a row at a time. These two numbers are then added together and then output
+	# if it's not the last column, then a tab will be placed, each row is then broken up by an echo statement
+	#DUE TO THE USE OF HEAD AND TAIL, THIS FUNCTION RUNS A LITTLE SLOW
+	for i in $(seq 1 $rows)
+	do
+		for j in $(seq 1 $cols)
+		do
+			lineANum=$(cat $temporary | head -n $i | tail -n 1 | cut -f $j)
+			lineBNum=$(cat $2 | head -n $i | tail -n 1 | cut -f $j)
+			printf "%d" $((lineANum+lineBNum))
+			if [ $j -lt $cols ]
+			then
+				printf "\t"
+			fi
+		done
+		echo
+	done
+}
+
+#takes two compatible matrices and outputs the product of the matrices
+multiply(){
+	#Calculates the dimensions of both matrices using the same method as above in previous funcitons
+	colA=$(head -n 1 $temporary | wc -w)
+	colB=$(head -n 1 $2 | wc -w)
+	rowA=$(wc -l < $temporary)
+	rowB=$(wc -l < $2)
+	#if the amount of columns (row size) in a is not the same as the amount of rows in B (column height) then an error will be thrown
+	if [ $colA -ne $rowB ]
+	then
+		echo "ERROR: MATRICES NOT COMPATIBLE" >&2
+		exit 2
+	fi
+	#Two nested for loops increment the variables I and J based off of the amount of rows in A and columns in B respectively. The outside loop represents
+	# each individual row in matrix A being multiplied to columns in matrix B. The second loop represents the incrementation through each column once a row is selected
+	# Next a temporary sum is created. A third for loop is then meant to increment through each variable in a paired row and column. Similarly to above head, tail and cut
+	# is used to increment through row being multiplied. Next this process is reversed to increment through the selected column. Once two numbers in a pair are selected
+	# they are multiplied together and then added to the temporary sum. This is then output along with a tab or new line if appropriate. The variable is then reset
+	# upon each new pair
+	#DUE TO THE USE OF HEAD AND TAIL, THIS FUNCTION RUNS A LITTLE SLOW
+	for i in $(seq 1 $rowA)
+	do
+		for j in $(seq 1 $colB)
+		do
+			tempSum=0
+			for k in $(seq 1 $colA)
+			do
+				matrixANum=$(cat $temporary | head -n $i | tail -n 1 | cut -f $k)
+				matrixBNum=$(cat $2 | cut -f $j | head -n $k | tail -n 1)
+				tempSum=$((tempSum + (matrixANum * matrixBNum)))
+			done
+			printf "%d" $tempSum
+			
+			if [ $j -lt $colB ]
+			then
+				printf "\t" 
+			fi
+		done
+		echo 
+	done
+}
+
+#This line is used to call the function that is passed in as the first argument, and then pass the rest of the arguments provided into this function
+$1 "${@:2}"
